@@ -1,0 +1,9 @@
+[project]
+name = "secure-notes"
+version = "1.0.0"
+description = "Aplikasi catatan terenkripsi dengan AES-GCM"
+requires-python = ">=3.9"
+dependencies = [
+    "streamlit>=1.30.0",
+    "cryptography>=42.0.0",
+]

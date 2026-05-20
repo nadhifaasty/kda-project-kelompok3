@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 notes/note.enc
+.venv/
+uv.lock
