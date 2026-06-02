@@ -87,3 +87,35 @@ def decrypt_text(ciphertext_b64: str) -> str:
         return decrypted_bytes.decode("utf-8")
     except Exception as e:
         raise ValueError("Gagal melakukan dekripsi. Data rusak atau kunci tidak valid.") from e
+
+
+def encrypt_with_key(plaintext: str, bit_length: int) -> str:
+    """
+    Enkripsi dengan panjang kunci tertentu (tanpa dependensi Streamlit).
+    """
+    if plaintext is None:
+        plaintext = ""
+    key = _get_or_create_key(bit_length)
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)
+    encrypted_bytes = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
+    final_packet = nonce + encrypted_bytes
+    return base64.b64encode(final_packet).decode("utf-8")
+
+
+def decrypt_with_key(ciphertext_b64: str, bit_length: int) -> str:
+    """
+    Dekripsi dengan panjang kunci tertentu (tanpa dependensi Streamlit).
+    """
+    if not ciphertext_b64 or not ciphertext_b64.strip():
+        return ""
+    try:
+        key = _get_or_create_key(bit_length)
+        aesgcm = AESGCM(key)
+        final_packet = base64.b64decode(ciphertext_b64.encode("utf-8"))
+        nonce = final_packet[:12]
+        encrypted_bytes = final_packet[12:]
+        decrypted_bytes = aesgcm.decrypt(nonce, encrypted_bytes, None)
+        return decrypted_bytes.decode("utf-8")
+    except Exception as e:
+        raise ValueError("Gagal melakukan dekripsi. Data rusak atau kunci tidak valid.") from e

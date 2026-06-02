@@ -1,7 +1,13 @@
-import streamlit as st
+import json
 import time
 import os
 from datetime import datetime
+
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+
+from benchmark import RESULTS_PATH, load_results, run_benchmark, save_results
 from crypto_utils import encrypt_text, decrypt_text
 
 # === KONFIGURASI HALAMAN ===
@@ -325,7 +331,6 @@ with st.sidebar:
     algoritma_terpilih: str = st.selectbox(
         label="Algoritma Enkripsi",
         options=list(OPSI_ALGORITMA.keys()),
-        index=list(OPSI_ALGORITMA.keys()).index(st.session_state["algoritma_dipilih"]),
         key="algoritma_dipilih",
     )
 
@@ -421,77 +426,182 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-# --- HALAMAN UTAMA ---
-st.markdown('<div class="main-header">Secure Notes</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="sub-header">Catatan terenkripsi yang aman disimpan di perangkat lokal anda</div>',
-    unsafe_allow_html=True,
-)
+# --- TAB NAVIGASI ---
+tab1, tab2 = st.tabs(["📝 Catatan", "📊 Benchmark"])
 
-# Textarea utama
-teks_dari_widget: str = st.text_area(
-    label="Catatan",
-    label_visibility="collapsed",
-    value=st.session_state["teks_saat_ini"],
-    height=320,
-    placeholder="Tulis catatanmu di sini...",
-    key="input_catatan",
-)
+with tab1:
+    st.markdown('<div class="main-header">Secure Notes</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sub-header">Catatan terenkripsi yang aman disimpan di perangkat lokal anda</div>',
+        unsafe_allow_html=True,
+    )
 
-# Character counter
-st.markdown(
-    f'<div class="char-counter">{len(teks_dari_widget):,} karakter</div>',
-    unsafe_allow_html=True,
-)
+    teks_dari_widget: str = st.text_area(
+        label="Catatan",
+        label_visibility="collapsed",
+        value=st.session_state["teks_saat_ini"],
+        height=320,
+        placeholder="Tulis catatanmu di sini...",
+        key="input_catatan",
+    )
 
-# Sinkronisasi dari widget ke session state
-if teks_dari_widget != st.session_state["teks_saat_ini"]:
-    st.session_state["teks_saat_ini"] = teks_dari_widget
-    st.session_state["waktu_ketik_terakhir"] = time.time()
-    if teks_dari_widget != st.session_state["teks_tersimpan"]:
-        st.session_state["status_simpan"] = "belum_simpan"
+    st.markdown(
+        f'<div class="char-counter">{len(teks_dari_widget):,} karakter</div>',
+        unsafe_allow_html=True,
+    )
 
+    if teks_dari_widget != st.session_state["teks_saat_ini"]:
+        st.session_state["teks_saat_ini"] = teks_dari_widget
+        st.session_state["waktu_ketik_terakhir"] = time.time()
+        if teks_dari_widget != st.session_state["teks_tersimpan"]:
+            st.session_state["status_simpan"] = "belum_simpan"
 
-# --- INDIKATOR STATUS & TOMBOL ---
-col_status, col_spacer, col_simpan, col_hapus = st.columns([2.5, 1, 1.2, 1.2])
+    col_status, col_spacer, col_simpan, col_hapus = st.columns([2.5, 1, 1.2, 1.2])
 
-with col_status:
-    if st.session_state["status_simpan"] == "tersimpan":
-        st.markdown(
-            '<span class="status-badge status-saved">Tersimpan</span>',
-            unsafe_allow_html=True,
+    with col_status:
+        if st.session_state["status_simpan"] == "tersimpan":
+            st.markdown(
+                '<span class="status-badge status-saved">Tersimpan</span>',
+                unsafe_allow_html=True,
+            )
+        elif st.session_state["status_simpan"] == "menyimpan":
+            st.markdown(
+                '<span class="status-badge status-saving">Menyimpan...</span>',
+                unsafe_allow_html=True,
+            )
+        elif st.session_state["status_simpan"] == "belum_simpan":
+            st.markdown(
+                '<span class="status-badge status-unsaved">Ada perubahan yang belum disimpan</span>',
+                unsafe_allow_html=True,
+            )
+
+    with col_simpan:
+        if st.button("Simpan Sekarang", use_container_width=True, type="primary"):
+            _simpan_catatan(st.session_state["teks_saat_ini"])
+            st.rerun()
+
+    with col_hapus:
+        if st.button("Hapus Catatan", use_container_width=True):
+            _hapus_catatan()
+            st.rerun()
+
+    st.markdown(
+        '<div class="footer-text">Secure Notes -- Keamanan Data -- 2026</div>',
+        unsafe_allow_html=True,
+    )
+
+    if st.session_state["status_simpan"] == "belum_simpan":
+        waktu_sekarang: float = time.time()
+        if waktu_sekarang - st.session_state["waktu_ketik_terakhir"] >= DEBOUNCE_DETIK:
+            st.session_state["status_simpan"] = "menyimpan"
+            _simpan_catatan(st.session_state["teks_saat_ini"])
+            st.rerun()
+
+with tab2:
+    st.markdown('<div class="main-header">Benchmark AES-GCM</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sub-header">Perbandingan performa AES-128, AES-192, dan AES-256 GCM</div>',
+        unsafe_allow_html=True,
+    )
+
+    col_run, col_del = st.columns([2, 1])
+    with col_run:
+        if st.button("🚀 Jalankan Benchmark", type="primary", use_container_width=True):
+            with st.spinner("Menjalankan benchmark... ini bisa memakan waktu beberapa saat."):
+                results = run_benchmark()
+                save_results(results)
+                st.rerun()
+
+    with col_del:
+        if st.button("🗑 Hapus Hasil", use_container_width=True):
+            if os.path.exists(RESULTS_PATH):
+                os.remove(RESULTS_PATH)
+                st.rerun()
+
+    results = load_results()
+    if results:
+        df = []
+        for r in results:
+            df.append({
+                "Algoritma": r["algo"],
+                "Ukuran": r["size_label"],
+                "Enc Rata-rata (ms)": r["enc_avg_ms"],
+                "Dec Rata-rata (ms)": r["dec_avg_ms"],
+                "Throughput (MB/s)": r["throughput_mbps"],
+            })
+
+        st.markdown("### Tabel Hasil")
+        st.dataframe(df, hide_index=True, use_container_width=True)
+
+        st.markdown("### Throughput per Algoritma")
+        fig1 = px.bar(
+            df,
+            x="Ukuran",
+            y="Throughput (MB/s)",
+            color="Algoritma",
+            barmode="group",
+            text_auto=".1f",
+            color_discrete_map={
+                "AES-128": "#3fb950",
+                "AES-192": "#d29922",
+                "AES-256": "#58a6ff",
+            },
         )
-    elif st.session_state["status_simpan"] == "menyimpan":
-        st.markdown(
-            '<span class="status-badge status-saving">Menyimpan...</span>',
-            unsafe_allow_html=True,
+        fig1.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font_color="#e6edf3",
+            height=400,
         )
-    elif st.session_state["status_simpan"] == "belum_simpan":
-        st.markdown(
-            '<span class="status-badge status-unsaved">Ada perubahan yang belum disimpan</span>',
-            unsafe_allow_html=True,
+        fig1.update_xaxes(gridcolor="#30363d")
+        fig1.update_yaxes(gridcolor="#30363d")
+        st.plotly_chart(fig1, use_container_width=True)
+
+        st.markdown("### Waktu Enkripsi vs Ukuran Data")
+        fig2 = px.line(
+            df,
+            x="Ukuran",
+            y="Enc Rata-rata (ms)",
+            color="Algoritma",
+            markers=True,
+            color_discrete_map={
+                "AES-128": "#3fb950",
+                "AES-192": "#d29922",
+                "AES-256": "#58a6ff",
+            },
         )
+        fig2.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font_color="#e6edf3",
+            height=400,
+        )
+        fig2.update_xaxes(gridcolor="#30363d")
+        fig2.update_yaxes(gridcolor="#30363d")
+        st.plotly_chart(fig2, use_container_width=True)
 
-with col_simpan:
-    if st.button("Simpan Sekarang", use_container_width=True, type="primary"):
-        _simpan_catatan(st.session_state["teks_saat_ini"])
-        st.rerun()
+        st.markdown("### Waktu Dekripsi vs Ukuran Data")
+        fig3 = px.line(
+            df,
+            x="Ukuran",
+            y="Dec Rata-rata (ms)",
+            color="Algoritma",
+            markers=True,
+            color_discrete_map={
+                "AES-128": "#3fb950",
+                "AES-192": "#d29922",
+                "AES-256": "#58a6ff",
+            },
+        )
+        fig3.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font_color="#e6edf3",
+            height=400,
+        )
+        fig3.update_xaxes(gridcolor="#30363d")
+        fig3.update_yaxes(gridcolor="#30363d")
+        st.plotly_chart(fig3, use_container_width=True)
 
-with col_hapus:
-    if st.button("Hapus Catatan", use_container_width=True):
-        _hapus_catatan()
-        st.rerun()
-
-st.markdown(
-    '<div class="footer-text">Secure Notes -- Keamanan Data -- 2026</div>',
-    unsafe_allow_html=True,
-)
-
-
-# === LOGIKA AUTOSAVE DENGAN DEBOUNCE ===
-if st.session_state["status_simpan"] == "belum_simpan":
-    waktu_sekarang: float = time.time()
-    if waktu_sekarang - st.session_state["waktu_ketik_terakhir"] >= DEBOUNCE_DETIK:
-        st.session_state["status_simpan"] = "menyimpan"
-        _simpan_catatan(st.session_state["teks_saat_ini"])
-        st.rerun()
+    else:
+        st.info("Belum ada data benchmark. Klik tombol **🚀 Jalankan Benchmark** di atas untuk memulai.")
